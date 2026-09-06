@@ -1,0 +1,97 @@
+# Публикация форка ValioBungee (RedisBungee) в свой Reposilite.
+#
+# ЭТОТ РЕПОЗИТОРИЙ ПУБЛИЧНЫЙ, поэтому `runs-on` здесь — только раннеры GitHub и
+# никогда `self-hosted`. Правило записано в вики (infra/ci.md, «Граница
+# безопасности: только приватные репозитории»), обе группы раннеров организации
+# имеют allows_public_repositories=false. Причина в том, что PR из чужого форка
+# исполняет workflow ИЗ САМОГО PR, то есть автор форка волен дописать
+# `runs-on: self-hosted` и получить исполнение своего кода на хосте, где
+# работает игровой сервер.
+#
+# Отсюда же остальные меры: триггера `pull_request` нет вовсе, push ограничен
+# нашими ветками, а job не запускается в форках самого форка.
+#
+# JAVA 21, А НЕ 25 — И ЭТО НЕ НЕДОСМОТР.
+#
+# Обёртка апстрима — Gradle 8.10.1 (gradle/wrapper/gradle-wrapper.properties),
+# он понимает Java максимум 23; на JDK 25 сборка падает сразу, ещё до
+# конфигурации, сообщением вида «* What went wrong: 25.0.3». Сверх того
+# `com.github.johnrengelman.shadow` 8.1.1 несовместим с Gradle 9, так что
+# «просто поднять обёртку» — тоже не однострочник. Проверено на JDK 21: сборка
+# и shadowJar проходят. Если поднимаете Java здесь — сначала поднимите Gradle
+# и замените shadow-плагин, иначе сломаете публикацию.
+#
+# Целевая среда от этого не страдает: прокси XMine работает на Velocity 4.1.1
+# под Java 25, а плагин компилируется с `options.release = 17`, то есть байткод
+# 17-й версии на 25-й JVM грузится штатно (проверено локальным запуском
+# velocity-4.1.1-24 с этим jar).
+
+name: XMine - publish ValioBungee (Velocity)
+
+on:
+  push:
+    branches: ['xmine/**']
+  workflow_dispatch:
+
+# Публикация не должна идти в два потока: параллельные сборки означали бы гонку
+# за то, чья попадёт под координату.
+concurrency:
+  group: xmine-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    # Форки самого форка не должны пытаться публиковать в наш Reposilite.
+    if: github.repository == 'XMineServer/ValioBungee'
+    runs-on: ubuntu-latest
+
+    env:
+      XMINE_MAVEN_USERNAME: ${{ secrets.XMINE_MAVEN_USERNAME }}
+      XMINE_MAVEN_PASSWORD: ${{ secrets.XMINE_MAVEN_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # api/build.gradle.kts зовёт `git rev-parse HEAD` через blossom,
+          # на клоне без истории это не отработает.
+          fetch-depth: 0
+
+      - name: JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: 'zulu'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Fail early without credentials
+        run: |
+          # Без учётки сборка дошла бы до конца и упала на последнем шаге.
+          # Дешевле проверить сразу.
+          if [ -z "${XMINE_MAVEN_USERNAME:-}" ] || [ -z "${XMINE_MAVEN_PASSWORD:-}" ]; then
+            echo "::error::Secrets XMINE_MAVEN_USERNAME / XMINE_MAVEN_PASSWORD are not set"
+            exit 1
+          fi
+
+      - name: Build shadow jar
+        run: ./gradlew :RedisBungee-Proxy-Velocity:shadowJar --stacktrace
+
+      - name: Publish to Reposilite (third-party)
+        run: ./gradlew :RedisBungee-Proxy-Velocity:publishXminePublicationToXmineRepository --stacktrace
+
+      - name: Report coordinate and checksum
+        run: |
+          set -eu
+          VERSION="$(sed -n 's/^version=//p' gradle.properties | tr -d '[:space:]')"
+          JAR="proxies/velocity/build/libs/RedisBungee-Proxy-Velocity-${VERSION}-all.jar"
+          {
+            echo "### Published"
+            echo '```'
+            echo "ru.xmine.thirdparty:valiobungee-velocity:${VERSION}"
+            sha256sum "$JAR"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

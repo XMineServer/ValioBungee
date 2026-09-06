@@ -29,10 +29,81 @@ import redis.clients.jedis.providers.PooledConnectionProvider;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public interface ConfigLoader extends GenericConfigLoader {
 
     int CONFIG_VERSION = 2;
+
+    // XMine: подстановка переменных окружения в строковые значения config.yml.
+    //
+    // Апстрим уже умеет читать окружение, но ровно для двух ключей --
+    // REDISBUNGEE_PROXY_ID и REDISBUNGEE_NETWORK_ID (ниже по этому же методу).
+    // До реквизитов Redis он не доходит, поэтому пароль приходилось подставлять
+    // в config.yml скриптом в entrypoint образа. Здесь этот механизм расширен
+    // на строковые поля подключения.
+    //
+    // Синтаксис -- голый ${VAR} и ${VAR:-default}, БЕЗ тега !ENV. Тег !ENV
+    // (org.yaml.snakeyaml.env.EnvScalarConstructor) здесь неприменим по двум
+    // независимым причинам:
+    //   1. configurate 3.7.3 создаёт Yaml в приватном конструкторе
+    //      YAMLConfigurationLoader, передать туда свой Constructor некуда;
+    //   2. в classpath лежит snakeyaml 1.26, где EnvScalarConstructor ещё
+    //      package-private (публичным стал в 1.27), причём нерелоцированный --
+    //      тот же пакет приносит и сам Velocity.
+    //
+    // Экранирование: '$$' даёт литеральный '$', то есть "$${FOO}" оставит в
+    // значении текст "${FOO}".
+    Pattern ENV_PATTERN = Pattern.compile("\\$(\\$)|\\$\\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?}");
+
+    /**
+     * XMine: раскрывает ${VAR} и ${VAR:-default} в значении конфига.
+     *
+     * @param value значение как оно прочитано из config.yml, может быть null
+     * @param key   имя ключа, только для текста ошибки
+     * @return значение с раскрытыми переменными
+     * @throws IllegalStateException если переменная не задана и у неё нет значения по умолчанию
+     */
+    private static String substituteEnvironment(String value, String key) {
+        if (value == null || value.indexOf('$') < 0) {
+            return value;
+        }
+        Matcher matcher = ENV_PATTERN.matcher(value);
+        StringBuilder out = new StringBuilder();
+        while (matcher.find()) {
+            String replacement;
+            if (matcher.group(1) != null) {
+                replacement = "$";
+            } else {
+                String name = matcher.group(2);
+                String fallback = matcher.group(3);
+                String fromEnv = System.getenv(name);
+                if (fromEnv == null) {
+                    if (fallback == null) {
+                        // Молча подставленная пустая строка означала бы попытку
+                        // соединиться с Redis без пароля и невнятную ошибку
+                        // много позже. Падаем сразу и по делу.
+                        throw new IllegalStateException(
+                                "config.yml: key '" + key + "' references environment variable '" + name
+                                        + "', which is not set. Set it, or give a default: ${" + name + ":-somevalue}");
+                    }
+                    fromEnv = fallback;
+                }
+                replacement = fromEnv;
+            }
+            matcher.appendReplacement(out, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(out);
+        return out.toString();
+    }
+
+    /**
+     * XMine: читает строковое значение конфига с подстановкой переменных окружения.
+     */
+    private static String envString(ConfigurationNode node, String key, String fallback) {
+        return substituteEnvironment(node.getNode(key).getString(fallback), key);
+    }
 
     default void loadConfig(RedisBungeePlugin<?> plugin, Path dataFolder) throws IOException {
         Path configFile = createConfigFile(dataFolder, "config.yml", "config.yml");
@@ -44,10 +115,11 @@ public interface ConfigLoader extends GenericConfigLoader {
         }
         final boolean useSSL = node.getNode("useSSL").getBoolean(false);
         final boolean kickWhenOnline = node.getNode("kick-when-online").getBoolean(true);
-        String redisPassword = node.getNode("redis-password").getString("");
-        String redisUsername = node.getNode("redis-username").getString("");
-        String networkId = node.getNode("network-id").getString("main");
-        String proxyId = node.getNode("proxy-id").getString("proxy-1");
+        // XMine: реквизиты и идентификаторы проходят через подстановку ${VAR} / ${VAR:-default}.
+        String redisPassword = envString(node, "redis-password", "");
+        String redisUsername = envString(node, "redis-username", "");
+        String networkId = envString(node, "network-id", "main");
+        String proxyId = envString(node, "proxy-id", "proxy-1");
 
         final int maxConnections = node.getNode("max-redis-connections").getInt(10);
         List<String> exemptAddresses;
@@ -153,7 +225,8 @@ public interface ConfigLoader extends GenericConfigLoader {
             poolConfig.setBlockWhenExhausted(true);
             node.getNode("redis-cluster-servers").getChildrenList().forEach((childNode) -> {
                 Map<Object, ? extends ConfigurationNode> hostAndPort = childNode.getChildrenMap();
-                String host = hostAndPort.get("host").getString();
+                // XMine: подстановка окружения и для адресов узлов кластера.
+                String host = substituteEnvironment(hostAndPort.get("host").getString(), "redis-cluster-servers.host");
                 int port = hostAndPort.get("port").getInt();
                 hostAndPortSet.add(new HostAndPort(host, port));
             });
@@ -165,7 +238,7 @@ public interface ConfigLoader extends GenericConfigLoader {
             redisBungeeMode = RedisBungeeMode.CLUSTER;
         } else {
             plugin.logInfo("RedisBungee MODE: SINGLE");
-            final String redisServer = node.getNode("redis-server").getString("127.0.0.1");
+            final String redisServer = envString(node, "redis-server", "127.0.0.1");
             final int redisPort = node.getNode("redis-port").getInt(6379);
             if (redisServer != null && redisServer.isEmpty()) {
                 throw new RuntimeException("No redis server specified");

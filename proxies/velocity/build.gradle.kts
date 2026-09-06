@@ -1,5 +1,6 @@
 plugins {
     java
+    `maven-publish`
     id("com.github.johnrengelman.shadow") version "8.1.1"
     id("xyz.jpenilla.run-velocity") version "2.0.0"
 }
@@ -46,3 +47,52 @@ tasks {
 
 }
 
+// XMine start - публикация shadow-jar в свой Reposilite.
+//
+// У апстрима этого модуля нет ни `maven-publish`, ни каких-либо repositories:
+// он умеет только положить jar в build/libs, а релизы раздаются через GitHub
+// Releases. Нам нужен адрес в Maven, потому что образ прокси собирает набор
+// плагинов из зеркала `third-party` (см. plugins.yml в XMineServer/VelocityServer),
+// а не качает файлы с чужих сайтов.
+//
+// Раздел здесь всегда `third-party` и не выбирается по версии, как в
+// XMineServer/Paper: это зеркало чужих плагинов, а не наш собственный код.
+//
+// Артефакт публикуется БЕЗ классификатора, хотя shadowJar даёт файлу суффикс
+// `-all`. Так уже лежит зеркалированный апстримный 0.12.5
+// (valiobungee-velocity-0.12.5.jar), и расходиться с ним нельзя: имя артефакта
+// в зеркале несёт платформу (`valiobungee-velocity`), а не способ сборки.
+publishing {
+    publications {
+        create<MavenPublication>("xmine") {
+            groupId = "ru.xmine.thirdparty"
+            artifactId = "valiobungee-velocity"
+            version = project.version.toString()
+            artifact(tasks.named("shadowJar")) {
+                classifier = ""
+            }
+        }
+    }
+    repositories {
+        // Имена свойств учётки - те же, что у остальных проектов XMine
+        // (XMinePlugins, Paper, WorldGuard): локально ~/.gradle/gradle.properties,
+        // в CI - переменные окружения. НЕ credentials(PasswordCredentials::class):
+        // та форма потребовала бы своих xmineUsername/xminePassword и развела бы
+        // форк с остальными репозиториями по учёткам.
+        maven {
+            name = "xmine"
+            val base = providers.gradleProperty("xmineMavenUrl")
+                .getOrElse("https://maven.xmine.world")
+            url = uri("$base/third-party")
+            credentials {
+                username = providers.gradleProperty("xmineMavenUsername")
+                    .orElse(providers.environmentVariable("XMINE_MAVEN_USERNAME"))
+                    .orNull
+                password = providers.gradleProperty("xmineMavenPassword")
+                    .orElse(providers.environmentVariable("XMINE_MAVEN_PASSWORD"))
+                    .orNull
+            }
+        }
+    }
+}
+// XMine end - публикация shadow-jar в свой Reposilite

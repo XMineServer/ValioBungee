@@ -7,9 +7,34 @@
 # - 'ValKey' By linux foundation https://valkey.io/download/
 # - 'KeyDB' by Snapchat inc https://docs.keydb.dev/docs/download/
 
+# ---------------------------------------------------------------------------
+# XMine fork: environment variables in this file
+#
+# The keys listed below accept ${VAR} and ${VAR:-default} and are expanded when
+# the config is read:
+#
+#     redis-server, redis-username, redis-password, network-id, proxy-id
+#     and 'host' of every entry in redis-cluster-servers
+#
+# NOTE: this is a BARE ${VAR}. There is no '!ENV' tag here, unlike the other
+# XMine forks (Paper, WorldGuard, LimboAuth), where the YAML loader itself does
+# the expansion and the syntax is 'key: !ENV ${VAR}'. RedisBungee reads its
+# config through configurate 3.7.3, which builds its SnakeYAML instance in a
+# private constructor, so the tag mechanism cannot be reached from here; the
+# expansion is done by the config loader instead.
+#
+# A variable that is not set and has no default is a hard startup error, not an
+# empty string. Write ${VAR:-} if an empty value is genuinely what you want.
+# To keep a literal '${...}' in a value, double the dollar: "$${NOT_A_VAR}".
+#
+# Only the keys listed above are expanded. Numbers, booleans, lists and
+# everything in lang.yml are left exactly as written.
+# ---------------------------------------------------------------------------
+
 
 # The 'Redis', 'ValKey', 'KeyDB' server you will use.
 # these settings are ignored when cluster mode is enabled.
+# Supports ${VAR} / ${VAR:-default}.
 redis-server: 127.0.0.1
 redis-port: 6379
 
@@ -28,14 +53,17 @@ cluster-mode-enabled: false
 
 # you can set single server and Jedis will automatically discover cluster nodes,
 # but might fail if this single redis node is down when Proxy startup, its recommended put the all the nodes
+# 'host' supports ${VAR} / ${VAR:-default}; 'port' does not (it is a number).
 redis-cluster-servers:
   - host: 127.0.0.1
     port: 6379
 
 # OPTIONAL: if your redis uses acl usernames set the username here. leave empty for no username.
+# Supports ${VAR} / ${VAR:-default}.
 redis-username: ""
 
 # OPTIONAL but recommended: If your Redis server uses AUTH, set the required password.
+# Supports ${VAR} / ${VAR:-default}, e.g.  redis-password: "${REDIS_PASSWORD}"
 redis-password: ""
 
 # Maximum connections that will be maintained to the Redis server.
@@ -50,10 +78,15 @@ useSSL: false
 
 # An identifier for this network, which helps to separate redisbungee instances on same redis instance.
 # You can use environment variable 'REDISBUNGEE_NETWORK_ID' to override
+# Supports ${VAR} / ${VAR:-default}.
 network-id: "main"
 
 # An identifier for this BungeeCord / Velocity instance. Will randomly generate if leaving it blank.
 # You can set Environment variable 'REDISBUNGEE_PROXY_ID' to override
+# Supports ${VAR} / ${VAR:-default}.
+# WARNING: if this ends up EMPTY, RedisBungee generates an id and REWRITES this
+# file, which drops every comment and every ${VAR} placeholder in it. Keep a
+# non-empty value here (or set REDISBUNGEE_PROXY_ID) if you rely on ${VAR}.
 proxy-id: "proxy-1"
 
 # since RedisBungee Internally now uses UnifiedJedis instead of Jedis, JedisPool.

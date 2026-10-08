@@ -1,4 +1,12 @@
-# Публикация форка ValioBungee (RedisBungee) в свой Reposilite.
+# Публикация форка ValioBungee (RedisBungee) в свой Reposilite, раздел-кандидат
+# пары форков `fork-snapshot` (вики, ADR-0056). Координата
+# ru.xmine.thirdparty:valiobungee-velocity, потребитель - VelocityServer
+# (plugins.yml). Закрепляться там можно только на сборку с `xmine/main` (вики,
+# ADR-0060); с фичевых веток `xmine/**` сборка тоже публикуется - для проверки
+# на стенде.
+#
+# Что в форке изменено: подстановка переменных среды в config.yml (голый
+# `${VAR}` / `${VAR:-default}`, см. ConfigLoader).
 #
 # ЭТОТ РЕПОЗИТОРИЙ ПУБЛИЧНЫЙ, поэтому `runs-on` здесь — только раннеры GitHub и
 # никогда `self-hosted`. Правило записано в вики (infra/ci.md, «Граница
@@ -35,12 +43,26 @@ on:
 
 # Публикация не должна идти в два потока: параллельные сборки означали бы гонку
 # за то, чья попадёт под координату.
+# Группа одна на репозиторий, а не на ref: коммит, уже влитый в xmine/main, с
+# фичевой ветки и с самой xmine/main даёт один и тот же адрес (префикс
+# xmine-main), и обе сборки иначе увидели бы 404.
 concurrency:
-  group: xmine-publish-${{ github.ref }}
+  group: xmine-publish
   cancel-in-progress: false
 
 permissions:
   contents: read
+
+env:
+  # Версия - адрес сборки <апстрим>-<ветка>-<ГГГГ-ММ-ДД>-<хеш>, её считает шаг
+  # «Версия» ниже. Апстримная часть читается из gradle.properties (version=),
+  # а не дублируется здесь: она говорит, поверх какого релиза сделан форк, и
+  # меняется вместе с перебазированием на новый апстрим.
+  MAVEN_GROUP_PATH: ru/xmine/thirdparty
+  MAVEN_ARTIFACT: valiobungee-velocity
+  # Раздел-кандидат пары форков, а не third-party: third-party - зеркало ЧУЖИХ
+  # артефактов, а сборку форка правим и собираем мы, поэтому у неё есть стадия.
+  MAVEN_SECTION: fork-snapshot
 
 jobs:
   publish:
@@ -68,30 +90,115 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Версия
+        # Правила - вики, conventions/versioning.md, «Вид версии»; так же считает
+        # корневой build.gradle.kts XMinePlatform.
+        #
+        # Хеш и дата - последнего коммита, затронувшего ВХОДЫ jar, а не HEAD: у
+        # неизменившегося jar версия прежняя, координата занята, публикация
+        # пропускается. Входы - модуль прокси, его транзитивные project()-зависимости
+        # (velocity-api лежит внутри proxies/velocity, commands и velocity-api тянут
+        # api), общие сборочные файлы и сам этот workflow - он задаёт JDK и флаги
+        # сборки, то есть байты jar. Не входят прочий .github, README, bungeecord.
+        #
+        # Ветка в версии - только пока этот коммит не в origin/xmine/main
+        # (интеграционная ветка форка, ADR-0060), иначе префикс xmine-main: новая
+        # ветка от xmine/main не перевыпускает тот же jar под своим именем.
+        # `/` в имени ветки заменяется на `-` - в версии Maven это разделитель
+        # пути в раскладке репозитория, и артефакт уехал бы не туда.
+        run: |
+          set -eu
+          upstream=$(sed -n 's/^version=//p' gradle.properties | tr -d '[:space:]')
+          [ -n "$upstream" ] || { echo "::error::version= не найден в gradle.properties"; exit 1; }
+          read -r cdate chash < <(git log -1 --format='%cs %h' -- \
+            api commands proxies/velocity \
+            build.gradle.kts settings.gradle.kts gradle.properties gradle gradlew \
+            .github/workflows/xmine-publish.yml)
+          if git merge-base --is-ancestor "$chash" origin/xmine/main 2>/dev/null; then
+            branch=xmine-main
+          else
+            branch=$(printf '%s' "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" | tr -c 'A-Za-z0-9.' '-' | sed 's/-\{2,\}/-/g; s/^-//; s/-$//')
+          fi
+          echo "XMINE_VERSION=${upstream}-${branch}-${cdate}-${chash}" >> "$GITHUB_ENV"
+
       - name: Fail early without credentials
         run: |
-          # Без учётки сборка дошла бы до конца и упала на последнем шаге.
-          # Дешевле проверить сразу.
+          set -eu
           if [ -z "${XMINE_MAVEN_USERNAME:-}" ] || [ -z "${XMINE_MAVEN_PASSWORD:-}" ]; then
             echo "::error::Secrets XMINE_MAVEN_USERNAME / XMINE_MAVEN_PASSWORD are not set"
             exit 1
           fi
 
-      - name: Build shadow jar
-        run: ./gradlew :RedisBungee-Proxy-Velocity:shadowJar --stacktrace
-
-      - name: Publish to Reposilite (third-party)
-        run: ./gradlew :RedisBungee-Proxy-Velocity:publishXminePublicationToXmineRepository --stacktrace
-
-      - name: Report coordinate and checksum
+      - name: Занята ли координата
+        id: exists
+        # Координата неизменяема, поэтому «уже опубликовано» - законный ответ, а не
+        # ошибка. Коды различаются намеренно: 404 - публиковать, 200 - пропустить,
+        # всё остальное - падать. 401 при неверном имени секрета иначе выглядел бы
+        # как «артефакта нет». Проверка обязательна ещё и потому, что
+        # `redeployment: false` в Reposilite не держит перезапись (вики,
+        # infra/known-issues.md): повторная сборка того же коммита иначе
+        # перезаписала бы jar другим sha256.
         run: |
           set -eu
-          VERSION="$(sed -n 's/^version=//p' gradle.properties | tr -d '[:space:]')"
-          JAR="proxies/velocity/build/libs/RedisBungee-Proxy-Velocity-${VERSION}-all.jar"
+          BASE="https://maven.xmine.world/${MAVEN_SECTION}/${MAVEN_GROUP_PATH}/${MAVEN_ARTIFACT}/${XMINE_VERSION}"
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+                   --user "${XMINE_MAVEN_USERNAME}:${XMINE_MAVEN_PASSWORD}" \
+                   "${BASE}/${MAVEN_ARTIFACT}-${XMINE_VERSION}.pom")
+          case "$CODE" in
+            404) echo "found=false" >> "$GITHUB_OUTPUT"; echo "Публикуем ${XMINE_VERSION}" ;;
+            200) echo "found=true"  >> "$GITHUB_OUTPUT"
+                 echo "${XMINE_VERSION} уже в разделе ${MAVEN_SECTION} - собирать нечего" ;;
+            *)   echo "::error::${BASE} ответил $CODE - это не «есть» и не «нет»"; exit 1 ;;
+          esac
+
+      - name: Build shadow jar
+        if: steps.exists.outputs.found == 'false'
+        run: ./gradlew :RedisBungee-Proxy-Velocity:shadowJar -PxmineVersion="${XMINE_VERSION}" --stacktrace
+
+      - name: Publish to Reposilite
+        if: steps.exists.outputs.found == 'false'
+        # maven-publish кладёт рядом с jar сгенерированный pom - без него координата
+        # неполна, и резолвер на той стороне спотыкается.
+        run: |
+          XMINE_MAVEN_URL="https://maven.xmine.world/${MAVEN_SECTION}" \
+            ./gradlew :RedisBungee-Proxy-Velocity:publishXmineForkPublicationToXmineRepository \
+            -PxmineVersion="${XMINE_VERSION}" --stacktrace
+
+      - name: Verify the way VelocityServer will fetch it
+        if: steps.exists.outputs.found == 'false'
+        # Сверка идёт ровно тем путём, которым пойдёт сборка образа: качаем по прямому
+        # адресу и сличаем хеш. Без этого «опубликовано» означает лишь «сервер ответил 2xx».
+        run: |
+          set -eu
+          BASE="https://maven.xmine.world/${MAVEN_SECTION}/${MAVEN_GROUP_PATH}/${MAVEN_ARTIFACT}/${XMINE_VERSION}"
+          curl --fail-with-body --silent --show-error \
+               --user "${XMINE_MAVEN_USERNAME}:${XMINE_MAVEN_PASSWORD}" \
+               -o /tmp/roundtrip.jar "${BASE}/${MAVEN_ARTIFACT}-${XMINE_VERSION}.jar"
+
+          JAR="proxies/velocity/build/libs/RedisBungee-Proxy-Velocity-${XMINE_VERSION}-all.jar"
+          LOCAL="$(sha256sum "${JAR}" | cut -d' ' -f1)"
+          REMOTE="$(sha256sum /tmp/roundtrip.jar | cut -d' ' -f1)"
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "::error::Round-trip mismatch: local $LOCAL, published $REMOTE"
+            exit 1
+          fi
+
           {
             echo "### Published"
             echo '```'
-            echo "ru.xmine.thirdparty:valiobungee-velocity:${VERSION}"
-            sha256sum "$JAR"
+            echo "$(echo "${MAVEN_GROUP_PATH}" | tr '/' '.'):${MAVEN_ARTIFACT}:${XMINE_VERSION}"
+            echo "repo:        ${MAVEN_SECTION}"
+            echo "sha256:      ${LOCAL}"
+            echo "base commit: ${GITHUB_SHA}"
             echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Уже опубликовано
+        if: steps.exists.outputs.found == 'true'
+        run: |
+          {
+            echo "### Ничего не публиковалось"
+            echo
+            echo "\`${XMINE_VERSION}\` уже лежит в разделе \`${MAVEN_SECTION}\`:"
+            echo "входы этой сборки с прошлой публикации не менялись."
           } >> "$GITHUB_STEP_SUMMARY"

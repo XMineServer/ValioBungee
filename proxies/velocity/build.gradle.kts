@@ -52,19 +52,20 @@ tasks {
 // У апстрима этого модуля нет ни `maven-publish`, ни каких-либо repositories:
 // он умеет только положить jar в build/libs, а релизы раздаются через GitHub
 // Releases. Нам нужен адрес в Maven, потому что образ прокси собирает набор
-// плагинов из зеркала `third-party` (см. plugins.yml в XMineServer/VelocityServer),
-// а не качает файлы с чужих сайтов.
+// плагинов из Reposilite (см. plugins.yml в XMineServer/VelocityServer), а не
+// качает файлы с чужих сайтов.
 //
-// Раздел здесь всегда `third-party` и не выбирается по версии, как в
-// XMineServer/Paper: это зеркало чужих плагинов, а не наш собственный код.
+// Раздел - кандидат пары форков `fork-snapshot`, а не `third-party`: third-party -
+// зеркало чужих jar, а эту сборку правим и собираем мы (вики, ADR-0056). Раздел
+// приходит из xmine-publish.yml через XMINE_MAVEN_URL. Версия - адрес сборки, см.
+// корневой build.gradle.kts.
 //
 // Артефакт публикуется БЕЗ классификатора, хотя shadowJar даёт файлу суффикс
-// `-all`. Так уже лежит зеркалированный апстримный 0.12.5
-// (valiobungee-velocity-0.12.5.jar), и расходиться с ним нельзя: имя артефакта
-// в зеркале несёт платформу (`valiobungee-velocity`), а не способ сборки.
+// `-all`: имя артефакта несёт платформу (`valiobungee-velocity`), а не способ
+// сборки, как у зеркалированного апстримного 0.12.5 в third-party.
 publishing {
     publications {
-        create<MavenPublication>("xmine") {
+        create<MavenPublication>("xmineFork") {
             groupId = "ru.xmine.thirdparty"
             artifactId = "valiobungee-velocity"
             version = project.version.toString()
@@ -81,9 +82,8 @@ publishing {
         // форк с остальными репозиториями по учёткам.
         maven {
             name = "xmine"
-            val base = providers.gradleProperty("xmineMavenUrl")
-                .getOrElse("https://maven.xmine.world")
-            url = uri("$base/third-party")
+            url = uri(providers.environmentVariable("XMINE_MAVEN_URL")
+                .getOrElse("https://maven.xmine.world/fork-snapshot"))
             credentials {
                 username = providers.gradleProperty("xmineMavenUsername")
                     .orElse(providers.environmentVariable("XMINE_MAVEN_USERNAME"))
@@ -96,3 +96,17 @@ publishing {
     }
 }
 // XMine end - публикация shadow-jar в свой Reposilite
+
+// XMine start - публикация только с адресом сборки
+// Без -PxmineVersion версия - голый апстримный номер из gradle.properties, и локальный
+// `publish` положил бы в раздел-кандидат координату, которая не адрес сборки, а
+// координаты там неизменяемы.
+val xmineVersion = providers.gradleProperty("xmineVersion")
+tasks.withType<PublishToMavenRepository>().configureEach {
+    doFirst {
+        if (!xmineVersion.isPresent) {
+            throw GradleException("Publishing needs -PxmineVersion: the build address computed by .github/workflows/xmine-publish.yml")
+        }
+    }
+}
+// XMine end - публикация только с адресом сборки

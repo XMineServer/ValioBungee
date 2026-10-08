@@ -43,8 +43,11 @@ on:
 
 # Публикация не должна идти в два потока: параллельные сборки означали бы гонку
 # за то, чья попадёт под координату.
+# Группа одна на репозиторий, а не на ref: коммит, уже влитый в xmine/main, с
+# фичевой ветки и с самой xmine/main даёт один и тот же адрес (префикс
+# xmine-main), и обе сборки иначе увидели бы 404.
 concurrency:
-  group: xmine-publish-${{ github.ref }}
+  group: xmine-publish
   cancel-in-progress: false
 
 permissions:
@@ -95,7 +98,8 @@ jobs:
         # неизменившегося jar версия прежняя, координата занята, публикация
         # пропускается. Входы - модуль прокси, его транзитивные project()-зависимости
         # (velocity-api лежит внутри proxies/velocity, commands и velocity-api тянут
-        # api) и общие сборочные файлы. Не входят .github, README, bungeecord.
+        # api), общие сборочные файлы и сам этот workflow - он задаёт JDK и флаги
+        # сборки, то есть байты jar. Не входят прочий .github, README, bungeecord.
         #
         # Ветка в версии - только пока этот коммит не в origin/xmine/main
         # (интеграционная ветка форка, ADR-0060), иначе префикс xmine-main: новая
@@ -108,7 +112,8 @@ jobs:
           [ -n "$upstream" ] || { echo "::error::version= не найден в gradle.properties"; exit 1; }
           read -r cdate chash < <(git log -1 --format='%cs %h' -- \
             api commands proxies/velocity \
-            build.gradle.kts settings.gradle.kts gradle.properties gradle gradlew)
+            build.gradle.kts settings.gradle.kts gradle.properties gradle gradlew \
+            .github/workflows/xmine-publish.yml)
           if git merge-base --is-ancestor "$chash" origin/xmine/main 2>/dev/null; then
             branch=xmine-main
           else

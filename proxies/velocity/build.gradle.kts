@@ -57,8 +57,8 @@ tasks {
 //
 // Раздел - кандидат пары форков `fork-snapshot`, а не `third-party`: third-party -
 // зеркало чужих jar, а эту сборку правим и собираем мы (вики, ADR-0056). Раздел
-// приходит из xmine-publish.yml через XMINE_MAVEN_URL, умолчание - для локального
-// запуска. Версия - адрес сборки, см. корневой build.gradle.kts.
+// приходит из xmine-publish.yml через XMINE_MAVEN_URL. Версия - адрес сборки, см.
+// корневой build.gradle.kts.
 //
 // Артефакт публикуется БЕЗ классификатора, хотя shadowJar даёт файлу суффикс
 // `-all`: имя артефакта несёт платформу (`valiobungee-velocity`), а не способ
@@ -96,3 +96,17 @@ publishing {
     }
 }
 // XMine end - публикация shadow-jar в свой Reposilite
+
+// XMine start - публикация только с адресом сборки
+// Без -PxmineVersion версия - голый апстримный номер из gradle.properties, и локальный
+// `publish` положил бы в раздел-кандидат координату, которая не адрес сборки, а
+// координаты там неизменяемы.
+val xmineVersion = providers.gradleProperty("xmineVersion")
+tasks.withType<PublishToMavenRepository>().configureEach {
+    doFirst {
+        if (!xmineVersion.isPresent) {
+            throw GradleException("Publishing needs -PxmineVersion: the build address computed by .github/workflows/xmine-publish.yml")
+        }
+    }
+}
+// XMine end - публикация только с адресом сборки

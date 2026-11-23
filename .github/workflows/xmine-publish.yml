@@ -151,6 +151,9 @@ jobs:
             *)   echo "::error::${BASE} ответил $CODE - это не «есть» и не «нет»"; exit 1 ;;
           esac
 
+      - name: Test metadata contract
+        run: ./gradlew :RedisBungee-API:test --stacktrace
+
       - name: Build shadow jar
         if: steps.exists.outputs.found == 'false'
         run: ./gradlew :RedisBungee-Proxy-Velocity:shadowJar -PxmineVersion="${XMINE_VERSION}" --stacktrace

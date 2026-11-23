@@ -105,6 +105,27 @@ public interface ConfigLoader extends GenericConfigLoader {
         return substituteEnvironment(node.getNode(key).getString(fallback), key);
     }
 
+    static Map<String, String> readProxyMetadata(ConfigurationNode root) {
+        ConfigurationNode node = root.getNode("proxy-metadata");
+        if (!node.isVirtual() && !node.hasMapChildren() && node.getValue() != null) {
+            throw new IllegalArgumentException("proxy-metadata must be a string map");
+        }
+        Map<String, String> metadata = new LinkedHashMap<>();
+        node.getChildrenMap().forEach((key, child) -> {
+            if (!(key instanceof String name)) {
+                throw new IllegalArgumentException("Invalid proxy-metadata key");
+            }
+            Object raw = child.getValue();
+            if (raw == null) return;
+            if (!(raw instanceof String)) {
+                throw new IllegalArgumentException("proxy-metadata." + name + " must be a string");
+            }
+            String value = substituteEnvironment((String) raw, "proxy-metadata." + name);
+            if (!value.isEmpty()) metadata.put(name, value);
+        });
+        return Map.copyOf(metadata);
+    }
+
     default void loadConfig(RedisBungeePlugin<?> plugin, Path dataFolder) throws IOException {
         Path configFile = createConfigFile(dataFolder, "config.yml", "config.yml");
         final YAMLConfigurationLoader yamlConfigurationFileLoader = YAMLConfigurationLoader.builder().setPath(configFile).build();
@@ -212,6 +233,7 @@ public interface ConfigLoader extends GenericConfigLoader {
                         installLastseen, installPlist, installPproxy,
                         installSendToAll, installServerid, installServerIds)
         ));
+        configuration.setProxyMetadata(readProxyMetadata(node));
         Summoner<?> summoner;
         RedisBungeeMode redisBungeeMode;
         if (useSSL) {

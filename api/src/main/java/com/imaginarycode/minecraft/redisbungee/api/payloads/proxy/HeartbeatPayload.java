@@ -12,10 +12,18 @@ package com.imaginarycode.minecraft.redisbungee.api.payloads.proxy;
 
 import com.imaginarycode.minecraft.redisbungee.api.payloads.AbstractPayload;
 
+import java.util.Map;
+
 public class HeartbeatPayload extends AbstractPayload {
 
-    public record HeartbeatData(long heartbeat, int players) {
+    public record HeartbeatData(long heartbeat, int players, Map<String, String> metadata) {
+        public HeartbeatData {
+            metadata = Map.copyOf(metadata);
+        }
 
+        public HeartbeatData(long heartbeat, int players) {
+            this(heartbeat, players, Map.of());
+        }
     }
 
     private final HeartbeatData data;

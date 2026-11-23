@@ -14,7 +14,7 @@
 # the config is read:
 #
 #     redis-server, redis-username, redis-password, network-id, proxy-id
-#     and 'host' of every entry in redis-cluster-servers
+#     'host' of every entry in redis-cluster-servers, and values in proxy-metadata
 #
 # NOTE: this is a BARE ${VAR}. There is no '!ENV' tag here, unlike the other
 # XMine forks (Paper, WorldGuard, LimboAuth), where the YAML loader itself does
@@ -173,3 +173,10 @@ commands:
 
 # Config version DO NOT CHANGE!!!!
 config-version: 2
+
+# XMine: optional public string parameters for this proxy (never put secrets here).
+# String values support ${VAR} / ${VAR:-default}. Published in each heartbeat.
+# Empty/null values are omitted. Changes/removals apply on the next proxy start.
+# voice-endpoint, when used, must be a reachable DNS/IP host:port (IPv6: [IP]:port).
+# This advertises configuration/process liveness, not UDP readiness.
+proxy-metadata: {}

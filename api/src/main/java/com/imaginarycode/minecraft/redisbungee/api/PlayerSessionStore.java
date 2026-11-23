@@ -2,6 +2,8 @@ package com.imaginarycode.minecraft.redisbungee.api;
 
 import redis.clients.jedis.UnifiedJedis;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +22,10 @@ public final class PlayerSessionStore {
     private final String network;
     private final String owner;
     private final Map<Object, String> sessions = new HashMap<>();
+    private final Map<String, Removal> pending = new LinkedHashMap<>();
+
+    private record Removal(UUID uuid, String session, long disconnectedAt) {}
+    public record Cleanup(UUID uuid, boolean owned) {}
 
     public PlayerSessionStore(UnifiedJedis jedis, String network, String owner) {
         this.jedis = jedis;
@@ -45,8 +51,34 @@ public final class PlayerSessionStore {
     public synchronized boolean remove(Object connection, UUID uuid) {
         String session = sessions.remove(connection);
         if (session == null) return false;
-        return Long.valueOf(1).equals(jedis.eval(REMOVE, List.of(key(uuid)),
-                List.of(owner, session, Long.toString(System.currentTimeMillis()))));
+        Removal removal = new Removal(uuid, session, System.currentTimeMillis());
+        pending.put(session, removal);
+        boolean owned = removeFromRedis(removal);
+        pending.remove(session);
+        return owned;
+    }
+
+    private boolean removeFromRedis(Removal removal) {
+        return Long.valueOf(1).equals(jedis.eval(REMOVE, List.of(key(removal.uuid())),
+                List.of(owner, removal.session(), Long.toString(removal.disconnectedAt()))));
+    }
+
+    public synchronized List<Cleanup> retryRemovals() {
+        List<Cleanup> results = new ArrayList<>();
+        var iterator = pending.values().iterator();
+        while (iterator.hasNext() && results.size() < 64) {
+            Removal removal = iterator.next();
+            try {
+                boolean owned = removeFromRedis(removal);
+                iterator.remove();
+                results.add(new Cleanup(removal.uuid(), owned));
+            } catch (RuntimeException unavailable) {
+                // Keep the token until a definite Redis response. A successful
+                // delete with a lost response is safe to retry (CAS returns 0).
+                break;
+            }
+        }
+        return results;
     }
 
     // Player implementations may define equality by UUID; routing epochs must

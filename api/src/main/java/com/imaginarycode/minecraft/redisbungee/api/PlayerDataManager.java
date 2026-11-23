@@ -194,7 +194,17 @@ public abstract class PlayerDataManager<P, LE, DE, PS extends IPubSubMessageEven
     }
 
     private void removePlayerSession(Object connection, UUID uuid) {
-        if (!playerSessions.remove(connection, uuid)) {
+        finishPlayerRemoval(uuid, playerSessions.remove(connection, uuid));
+    }
+
+    public void retrySessionCleanup() {
+        for (PlayerSessionStore.Cleanup cleanup : playerSessions.retryRemovals()) {
+            finishPlayerRemoval(cleanup.uuid(), cleanup.owned());
+        }
+    }
+
+    private void finishPlayerRemoval(UUID uuid, boolean owned) {
+        if (!owned) {
             // A new login on another proxy owns the player hash now. Remove
             // stale local membership only when no current local player exists.
             if (!plugin.proxyDataManager().getLocalOnlineUUIDs().contains(uuid)) {

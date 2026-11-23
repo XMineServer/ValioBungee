@@ -43,6 +43,49 @@ class PlayerSessionStoreTest {
     }
 
     @Test
+    void retriesDisconnectAfterRedisRecoveryWithoutRelogAndKeepsNewerSession() {
+        for (boolean relog : new boolean[]{false, true}) {
+            String network = UUID.randomUUID().toString();
+            UUID player = UUID.randomUUID();
+            String key = "redis-bungee::" + network + "::player::" + player + "::data";
+            var unavailable = new java.util.concurrent.atomic.AtomicBoolean(false);
+            try (var redis = new JedisPooled("127.0.0.1", Integer.parseInt(System.getenv("METADATA_TEST_REDIS_PORT"))) {
+                @Override
+                public Object eval(String script, java.util.List<String> keys, java.util.List<String> args) {
+                    if (unavailable.get()) {
+                        throw new redis.clients.jedis.exceptions.JedisConnectionException("Redis unavailable");
+                    }
+                    return super.eval(script, keys, args);
+                }
+            }) {
+                var store = new PlayerSessionStore(redis, network, "live-owner");
+                Object connection = new Object();
+                Map<String, String> data = Map.of("proxy", "a", "last-online", "0");
+                store.add(connection, player, data);
+                unavailable.set(true);
+                assertThrows(RuntimeException.class, () -> store.remove(connection, player));
+                assertTrue(store.retryRemovals().isEmpty());
+                assertEquals("0", redis.hget(key, "last-online"));
+                if (relog) store.add(new Object(), player, data);
+                String session = redis.hget(key, "session");
+                unavailable.set(false);
+                var results = store.retryRemovals();
+                assertEquals(1, results.size());
+                assertEquals(!relog, results.get(0).owned());
+                if (relog) {
+                    assertEquals(session, redis.hget(key, "session"));
+                    assertEquals("0", redis.hget(key, "last-online"));
+                } else {
+                    assertNull(redis.hget(key, "session"));
+                    assertNotEquals("0", redis.hget(key, "last-online"));
+                }
+                assertTrue(store.retryRemovals().isEmpty());
+                redis.del(key);
+            }
+        }
+    }
+
+    @Test
     void equalPlayersStillHaveDistinctConnectionKeys() {
         String first = new String("same UUID"), next = new String("same UUID");
         assertNotEquals(new PlayerSessionStore.ConnectionKey(first), new PlayerSessionStore.ConnectionKey(next));

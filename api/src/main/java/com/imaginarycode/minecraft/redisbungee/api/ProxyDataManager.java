@@ -127,6 +127,7 @@ public abstract class ProxyDataManager implements Runnable {
     // call every 1 second
     public synchronized void publishHeartbeat() {
         if (isClosed()) return;
+        plugin.playerDataManager().retrySessionCleanup();
         publishMetadata();
         HeartbeatPayload.HeartbeatData heartbeatData = new HeartbeatPayload.HeartbeatData(Instant.now().getEpochSecond(), this.getLocalOnlineUUIDs().size());
         this.heartbeats.put(this.proxyId(), heartbeatData);

@@ -38,6 +38,7 @@ public abstract class PlayerDataManager<P, LE, DE, PS extends IPubSubMessageEven
     private final UnifiedJedis unifiedJedis;
     private final String proxyId;
     private final String networkId;
+    private final PlayerSessionStore playerSessions;
     private final LoadingCache<UUID, String> serverCache = Caffeine.newBuilder().expireAfterWrite(1, TimeUnit.HOURS).build(this::getServerFromRedis);
     private final LoadingCache<UUID, String> lastServerCache = Caffeine.newBuilder().expireAfterWrite(1, TimeUnit.HOURS).build(this::getLastServerFromRedis);
     private final LoadingCache<UUID, String> proxyCache = Caffeine.newBuilder().expireAfterWrite(1, TimeUnit.HOURS).build(this::getProxyFromRedis);
@@ -50,6 +51,7 @@ public abstract class PlayerDataManager<P, LE, DE, PS extends IPubSubMessageEven
         this.unifiedJedis = plugin.proxyDataManager().unifiedJedis();
         this.proxyId = plugin.proxyDataManager().proxyId();
         this.networkId = plugin.proxyDataManager().networkId();
+        this.playerSessions = new PlayerSessionStore(unifiedJedis, networkId, plugin.proxyDataManager().metadataOwner());
     }
 
     // handle network wide
@@ -160,16 +162,20 @@ public abstract class PlayerDataManager<P, LE, DE, PS extends IPubSubMessageEven
         unifiedJedis.hset("redis-bungee::" + this.networkId + "::player::" + uuid + "::data", data);
     }
 
+    protected void addPlayer(P player, UUID uuid, String name, InetAddress inetAddress) {
+        addPlayerSession(new PlayerSessionStore.ConnectionKey(player), uuid, name, inetAddress);
+    }
+
     protected void addPlayer(final UUID uuid, final String name, final InetAddress inetAddress) {
+        addPlayerSession(uuid, uuid, name, inetAddress);
+    }
+
+    private void addPlayerSession(Object connection, UUID uuid, String name, InetAddress inetAddress) {
         Map<String, String> redisData = new HashMap<>();
         redisData.put("last-online", String.valueOf(0));
         redisData.put("proxy", this.proxyId);
-        // Additive voice routing epoch: stale players from a crashed launch
-        // must not route to a new process with the same proxy ID.
-        redisData.put("proxy-owner", plugin.proxyDataManager().metadataOwner());
-        redisData.put("session", UUID.randomUUID().toString());
         redisData.put("ip", inetAddress.getHostAddress());
-        unifiedJedis.hset("redis-bungee::" + this.networkId + "::player::" + uuid + "::data", redisData);
+        playerSessions.add(connection, uuid, redisData);
         plugin.getUuidTranslator().persistInfo(name, uuid, this.unifiedJedis);
         JSONObject data = new JSONObject();
         data.put("proxy", this.proxyId);
@@ -179,9 +185,23 @@ public abstract class PlayerDataManager<P, LE, DE, PS extends IPubSubMessageEven
         this.plugin.proxyDataManager().addPlayer(uuid);
     }
 
+    protected void removePlayer(P player, UUID uuid) {
+        removePlayerSession(new PlayerSessionStore.ConnectionKey(player), uuid);
+    }
+
     protected void removePlayer(UUID uuid) {
-        unifiedJedis.hset("redis-bungee::" + this.networkId + "::player::" + uuid + "::data", "last-online", String.valueOf(System.currentTimeMillis()));
-        unifiedJedis.hdel("redis-bungee::" + this.networkId + "::player::" + uuid + "::data", "server", "proxy", "ip", "proxy-owner", "session");
+        removePlayerSession(uuid, uuid);
+    }
+
+    private void removePlayerSession(Object connection, UUID uuid) {
+        if (!playerSessions.remove(connection, uuid)) {
+            // A new login on another proxy owns the player hash now. Remove
+            // stale local membership only when no current local player exists.
+            if (!plugin.proxyDataManager().getLocalOnlineUUIDs().contains(uuid)) {
+                plugin.proxyDataManager().removePlayer(uuid);
+            }
+            return;
+        }
         JSONObject data = new JSONObject();
         data.put("proxy", this.proxyId);
         data.put("uuid", uuid);

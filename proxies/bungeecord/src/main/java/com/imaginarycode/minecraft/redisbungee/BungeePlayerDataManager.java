@@ -85,12 +85,12 @@ public class BungeePlayerDataManager extends PlayerDataManager<ProxiedPlayer, Po
 
     @EventHandler
     public void onLoginEvent(PostLoginEvent event) {
-        super.addPlayer(event.getPlayer(), event.getPlayer().getUniqueId(), event.getPlayer().getName(), event.getPlayer().getAddress().getAddress());
+        super.addPlayer(event.getPlayer().getUniqueId(), event.getPlayer().getName(), event.getPlayer().getAddress().getAddress());
     }
 
     @EventHandler
     public void onDisconnectEvent(PlayerDisconnectEvent event) {
-        super.removePlayer(event.getPlayer(), event.getPlayer().getUniqueId());
+        super.removePlayer(event.getPlayer().getUniqueId());
     }
 
 

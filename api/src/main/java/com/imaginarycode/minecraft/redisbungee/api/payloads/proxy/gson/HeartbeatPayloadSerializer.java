@@ -14,6 +14,8 @@ import com.google.gson.*;
 import com.imaginarycode.minecraft.redisbungee.api.payloads.proxy.HeartbeatPayload;
 
 import java.lang.reflect.Type;
+import java.util.HashMap;
+import java.util.Map;
 
 public class HeartbeatPayloadSerializer implements JsonSerializer<HeartbeatPayload>, JsonDeserializer<HeartbeatPayload> {
 
@@ -24,7 +26,12 @@ public class HeartbeatPayloadSerializer implements JsonSerializer<HeartbeatPaylo
         String senderProxy = jsonObject.get("proxy").getAsString();
         long heartbeat = jsonObject.get("heartbeat").getAsLong();
         int players = jsonObject.get("players").getAsInt();
-        return new HeartbeatPayload(senderProxy, new HeartbeatPayload.HeartbeatData(heartbeat, players));
+        Map<String, String> metadata = new HashMap<>();
+        if (jsonObject.has("metadata") && !jsonObject.get("metadata").isJsonNull()) {
+            jsonObject.getAsJsonObject("metadata").entrySet().forEach(entry ->
+                    metadata.put(entry.getKey(), entry.getValue().getAsString()));
+        }
+        return new HeartbeatPayload(senderProxy, new HeartbeatPayload.HeartbeatData(heartbeat, players, metadata));
     }
 
     @Override
@@ -33,6 +40,9 @@ public class HeartbeatPayloadSerializer implements JsonSerializer<HeartbeatPaylo
         jsonObject.add("proxy", new JsonPrimitive(src.senderProxy()));
         jsonObject.add("heartbeat", new JsonPrimitive(src.data().heartbeat()));
         jsonObject.add("players", new JsonPrimitive(src.data().players()));
+        JsonObject metadata = new JsonObject();
+        src.data().metadata().forEach(metadata::addProperty);
+        jsonObject.add("metadata", metadata);
         return jsonObject;
     }
 }

@@ -44,8 +44,6 @@ public abstract class ProxyDataManager implements Runnable {
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     private final UnifiedJedis unifiedJedis;
-    private final ProxyMetadataPublisher metadataPublisher;
-    private boolean metadataFailureLogged;
 
     // data:
     // Proxy id, heartbeat (unix epoch from instant), players as int
@@ -71,21 +69,6 @@ public abstract class ProxyDataManager implements Runnable {
         this.networkId = plugin.configuration().networkId();
         this.STREAM_ID = "network-" + this.networkId + "-redisbungee-stream";
         this.destroyProxyMembers();
-        this.metadataPublisher = new ProxyMetadataPublisher(unifiedJedis, networkId, proxyId,
-                plugin.configuration().proxyMetadata());
-        publishMetadata();
-    }
-
-    private void publishMetadata() {
-        try {
-            metadataPublisher.publish();
-            metadataFailureLogged = false;
-        } catch (RuntimeException e) {
-            if (!metadataFailureLogged) {
-                plugin.logWarn("Proxy metadata publication failed; retrying on heartbeat (TTL is 30 seconds)");
-                metadataFailureLogged = true;
-            }
-        }
     }
 
     public abstract Set<UUID> getLocalOnlineUUIDs();
@@ -127,9 +110,7 @@ public abstract class ProxyDataManager implements Runnable {
     // call every 1 second
     public synchronized void publishHeartbeat() {
         if (isClosed()) return;
-        plugin.playerDataManager().retrySessionCleanup();
-        publishMetadata();
-        HeartbeatPayload.HeartbeatData heartbeatData = new HeartbeatPayload.HeartbeatData(Instant.now().getEpochSecond(), this.getLocalOnlineUUIDs().size());
+        HeartbeatPayload.HeartbeatData heartbeatData = new HeartbeatPayload.HeartbeatData(Instant.now().getEpochSecond(), this.getLocalOnlineUUIDs().size(), plugin.configuration().proxyMetadata());
         this.heartbeats.put(this.proxyId(), heartbeatData);
         publishPayload(new HeartbeatPayload(this.proxyId, heartbeatData));
     }
@@ -403,13 +384,8 @@ public abstract class ProxyDataManager implements Runnable {
         }
     }
 
-    public synchronized void close() {
-        if (!closed.compareAndSet(false, true)) return;
-        try {
-            metadataPublisher.close();
-        } catch (RuntimeException e) {
-            plugin.logWarn("Could not remove proxy metadata; it will expire within 30 seconds");
-        }
+    public void close() {
+        closed.set(true);
         this.publishDeath();
         this.heartbeats.clear();
         this.destroyProxyMembers();
@@ -417,10 +393,6 @@ public abstract class ProxyDataManager implements Runnable {
 
     public boolean isClosed() {
         return closed.get();
-    }
-
-    public String metadataOwner() {
-        return metadataPublisher.owner();
     }
 
     public String proxyId() {

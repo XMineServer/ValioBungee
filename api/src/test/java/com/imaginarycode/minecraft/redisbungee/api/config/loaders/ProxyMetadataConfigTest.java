@@ -19,15 +19,13 @@ class ProxyMetadataConfigTest {
     }
 
     @Test
-    void rejectsInvalidKeysValuesAndNonStringNodes() {
-        for (Object value : new Object[]{42, Map.of("nested", "value"), "a\nb", "x".repeat(4097)}) {
+    void rejectsNonStringNodes() {
+        for (Object value : new Object[]{42, Map.of("nested", "value")}) {
             var root = SimpleConfigurationNode.root();
             root.getNode("proxy-metadata", "key").setValue(value);
             assertThrows(IllegalArgumentException.class, () -> ConfigLoader.readProxyMetadata(root));
         }
         var root = SimpleConfigurationNode.root();
-        root.getNode("proxy-metadata", "Bad:key").setValue("value");
-        assertThrows(IllegalArgumentException.class, () -> ConfigLoader.readProxyMetadata(root));
         root.getNode("proxy-metadata").setValue("bad");
         assertThrows(IllegalArgumentException.class, () -> ConfigLoader.readProxyMetadata(root));
     }

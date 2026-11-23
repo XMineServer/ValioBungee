@@ -70,16 +70,7 @@ jobs:
     if: github.repository == 'XMineServer/ValioBungee'
     runs-on: ubuntu-latest
 
-    services:
-      redis:
-        image: redis:7.2.4
-        ports: ['6379:6379']
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s --health-timeout 3s --health-retries 10
-
     env:
-      METADATA_TEST_REDIS_PORT: '6379'
       XMINE_MAVEN_USERNAME: ${{ secrets.XMINE_MAVEN_USERNAME }}
       XMINE_MAVEN_PASSWORD: ${{ secrets.XMINE_MAVEN_PASSWORD }}
 

@@ -111,11 +111,8 @@ public interface ConfigLoader extends GenericConfigLoader {
             throw new IllegalArgumentException("proxy-metadata must be a string map");
         }
         Map<String, String> metadata = new LinkedHashMap<>();
-        if (node.getChildrenMap().size() > 64) {
-            throw new IllegalArgumentException("proxy-metadata allows at most 64 entries");
-        }
         node.getChildrenMap().forEach((key, child) -> {
-            if (!(key instanceof String name) || !name.matches("[a-z][a-z0-9-]{0,63}")) {
+            if (!(key instanceof String name)) {
                 throw new IllegalArgumentException("Invalid proxy-metadata key");
             }
             Object raw = child.getValue();
@@ -124,10 +121,6 @@ public interface ConfigLoader extends GenericConfigLoader {
                 throw new IllegalArgumentException("proxy-metadata." + name + " must be a string");
             }
             String value = substituteEnvironment((String) raw, "proxy-metadata." + name);
-            if (value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 4096
-                    || value.chars().anyMatch(Character::isISOControl)) {
-                throw new IllegalArgumentException("Invalid proxy-metadata value for " + name);
-            }
             if (!value.isEmpty()) metadata.put(name, value);
         });
         return Map.copyOf(metadata);

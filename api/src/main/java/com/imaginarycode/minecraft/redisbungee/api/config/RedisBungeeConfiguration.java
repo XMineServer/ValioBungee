@@ -16,10 +16,12 @@ import com.google.common.net.InetAddresses;
 import javax.annotation.Nullable;
 import java.net.InetAddress;
 import java.util.List;
+import java.util.Map;
 
 public class RedisBungeeConfiguration {
 
     private final String proxyId;
+    private Map<String, String> proxyMetadata = Map.of();
     private final List<InetAddress> exemptAddresses;
     private final boolean kickWhenOnline;
 
@@ -42,6 +44,14 @@ public class RedisBungeeConfiguration {
         this.handleMotd = handleMotd;
         this.commandsConfiguration = commandsConfiguration;
         this.networkId = networkId;
+    }
+
+    public Map<String, String> proxyMetadata() {
+        return proxyMetadata;
+    }
+
+    public void setProxyMetadata(Map<String, String> metadata) {
+        this.proxyMetadata = Map.copyOf(metadata);
     }
 
     public String getProxyId() {

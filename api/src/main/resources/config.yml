@@ -173,3 +173,11 @@ commands:
 
 # Config version DO NOT CHANGE!!!!
 config-version: 2
+
+# XMine: optional public string parameters for this proxy (never put secrets here).
+# Keys: [a-z][a-z0-9-]{0,63}; up to 64 entries, 4096 UTF-8 bytes/value,
+# no control characters. Values support ${VAR} / ${VAR:-default}.
+# Empty/null values are omitted. Changes/removals apply on the next proxy start.
+# voice-endpoint, when used, must be a reachable DNS/IP host:port (IPv6: [IP]:port).
+# This advertises configuration/process liveness, not UDP readiness.
+proxy-metadata: {}

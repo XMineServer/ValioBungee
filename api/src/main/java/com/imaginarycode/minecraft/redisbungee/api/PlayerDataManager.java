@@ -164,6 +164,10 @@ public abstract class PlayerDataManager<P, LE, DE, PS extends IPubSubMessageEven
         Map<String, String> redisData = new HashMap<>();
         redisData.put("last-online", String.valueOf(0));
         redisData.put("proxy", this.proxyId);
+        // Additive voice routing epoch: stale players from a crashed launch
+        // must not route to a new process with the same proxy ID.
+        redisData.put("proxy-owner", plugin.proxyDataManager().metadataOwner());
+        redisData.put("session", UUID.randomUUID().toString());
         redisData.put("ip", inetAddress.getHostAddress());
         unifiedJedis.hset("redis-bungee::" + this.networkId + "::player::" + uuid + "::data", redisData);
         plugin.getUuidTranslator().persistInfo(name, uuid, this.unifiedJedis);
@@ -177,7 +181,7 @@ public abstract class PlayerDataManager<P, LE, DE, PS extends IPubSubMessageEven
 
     protected void removePlayer(UUID uuid) {
         unifiedJedis.hset("redis-bungee::" + this.networkId + "::player::" + uuid + "::data", "last-online", String.valueOf(System.currentTimeMillis()));
-        unifiedJedis.hdel("redis-bungee::" + this.networkId + "::player::" + uuid + "::data", "server", "proxy", "ip");
+        unifiedJedis.hdel("redis-bungee::" + this.networkId + "::player::" + uuid + "::data", "server", "proxy", "ip", "proxy-owner", "session");
         JSONObject data = new JSONObject();
         data.put("proxy", this.proxyId);
         data.put("uuid", uuid);

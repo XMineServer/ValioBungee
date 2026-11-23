@@ -70,7 +70,16 @@ jobs:
     if: github.repository == 'XMineServer/ValioBungee'
     runs-on: ubuntu-latest
 
+    services:
+      redis:
+        image: redis:7.2.4
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
     env:
+      METADATA_TEST_REDIS_PORT: '6379'
       XMINE_MAVEN_USERNAME: ${{ secrets.XMINE_MAVEN_USERNAME }}
       XMINE_MAVEN_PASSWORD: ${{ secrets.XMINE_MAVEN_PASSWORD }}
 
@@ -150,6 +159,9 @@ jobs:
                  echo "${XMINE_VERSION} уже в разделе ${MAVEN_SECTION} - собирать нечего" ;;
             *)   echo "::error::${BASE} ответил $CODE - это не «есть» и не «нет»"; exit 1 ;;
           esac
+
+      - name: Test metadata contract
+        run: ./gradlew :RedisBungee-API:test --stacktrace
 
       - name: Build shadow jar
         if: steps.exists.outputs.found == 'false'

@@ -36,8 +36,10 @@ public final class PlayerSessionStore {
         Map<String, String> snapshot = new HashMap<>(data);
         snapshot.put("proxy-owner", owner);
         snapshot.put("session", session);
-        jedis.hset(key(uuid), snapshot);
+        // Retain the token even when Redis commits but its response is lost;
+        // a later disconnect can still conditionally clean up that write.
         sessions.put(connection, session);
+        jedis.hset(key(uuid), snapshot);
     }
 
     public synchronized boolean remove(Object connection, UUID uuid) {
